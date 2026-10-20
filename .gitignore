@@ -1,2 +1,5 @@
-myvenv
+
 /myvenv
+__pycache__
+.claude
+myvenv
