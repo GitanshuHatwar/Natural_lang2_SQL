@@ -2,12 +2,15 @@
 
 import os
 import re
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 
-MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
+MODEL = os.environ.get("OLLAMA_MODEL")
 
 _SYSTEM = """You are a MySQL expert. Using ONLY the tables and columns in the schema below, \
 write ONE read-only SELECT query that answers the user's question.
