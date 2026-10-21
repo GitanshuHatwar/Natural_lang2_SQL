@@ -5,3 +5,5 @@ pandas
 langchain-core
 langchain-ollama
 python-dotenv
+sqlparse
+sqlglot

@@ -1,39 +1,107 @@
-"""LLM integration: generate SQL from a natural-language question via Ollama."""
+"""LLM integration: generate SQL from natural language questions via Ollama."""
 
 import os
 import re
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 
-MODEL = os.environ.get("OLLAMA_MODEL")
+MODEL = os.environ.get("OLLAMA_MODEL") or "qwen2.5-coder:7b"
 
-_SYSTEM = """You are a MySQL expert. Using ONLY the tables and columns in the schema below, \
-write ONE read-only SELECT query that answers the user's question.
-Rules:
-- Return only the SQL. No explanation, no markdown fences.
-- Use only columns that exist in the schema.
-- Add LIMIT 100 unless the question asks for an aggregate or a full count.
+_SYSTEM_PROMPT = """You are an expert MySQL database administrator and query generator.
+Using ONLY the tables, columns, and data conventions present in the database schema below, generate ONE valid MySQL query to satisfy the user request.
+
+Operational Rules:
+1. READ REQUESTS (find, show, count, list, calculate):
+   - Write a valid SELECT query.
+   - Include LIMIT 100 unless an aggregate (COUNT, SUM, AVG) or explicit limit is specified.
+2. INSERT REQUESTS (add, insert, create, register):
+   - Write a valid INSERT INTO query specifying the target table, explicit column names, and appropriately formatted values.
+3. UPDATE REQUESTS (update, edit, modify, change):
+   - Write a valid UPDATE query with precise WHERE conditions.
+4. DELETE REQUESTS (delete, remove):
+   - Write a valid DELETE FROM query with precise WHERE conditions.
+5. PROHIBITIONS:
+   - NEVER generate DROP, TRUNCATE, ALTER, GRANT, or REVOKE queries.
+   - Do NOT generate multiple queries or batch statements.
+6. OUTPUT FORMAT:
+   - Return ONLY the executable raw SQL query.
+   - Do NOT include markdown code fences (no ```sql), explanations, commentary, or greetings.
 
 SCHEMA:
 {schema}"""
 
-_prompt = ChatPromptTemplate.from_messages([
-    ("system", _SYSTEM),
-    ("human", "{question}"),
-])
 
-_chain = _prompt | ChatOllama(model=MODEL, temperature=0) | StrOutputParser()
+def _get_llm(temperature: float = 0.0) -> ChatOllama:
+    model_name = os.environ.get("OLLAMA_MODEL") or "qwen2.5-coder:7b"
+    return ChatOllama(model=model_name, temperature=temperature)
 
 
-def generate_sql(schema: str, question: str) -> str:
-    """Send schema + question to Ollama and return a clean SQL string."""
-    raw: str = _chain.invoke({"schema": schema, "question": question})
-    # Strip markdown code fences if the model includes them anyway
+def clean_sql_output(raw: str) -> str:
+    """Strip markdown code fences, leading tags, and trailing spaces."""
     cleaned = re.sub(r"^```(?:sql)?\s*", "", raw.strip(), flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned.strip())
+    # Remove any stray comments at the start
+    cleaned = re.sub(r"^--.*?\n", "", cleaned.strip())
     return cleaned.strip()
+
+
+def generate_sql(schema: str, question: str, history: Optional[list[dict]] = None) -> str:
+    """
+    Send schema + question + optional conversation history to Ollama and return a clean SQL string.
+    """
+    messages = [SystemMessage(content=_SYSTEM_PROMPT.format(schema=schema))]
+
+    # Append recent conversation turns for multi-turn coreference resolution
+    if history:
+        for turn in history[-3:]:
+            if "question" in turn and "sql" in turn:
+                messages.append(HumanMessage(content=turn["question"]))
+                messages.append(AIMessage(content=turn["sql"]))
+
+    messages.append(HumanMessage(content=question))
+
+    llm = _get_llm(temperature=0.0)
+    response = llm.invoke(messages)
+    return clean_sql_output(response.content)
+
+
+def fix_sql(schema: str, failed_sql: str, error_message: str, question: str) -> str:
+    """
+    Self-healing: Given a failed SQL query and the exact MySQL error message,
+    prompts the LLM to analyze the schema and output a corrected query.
+    """
+    repair_prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a MySQL debugging expert. You are provided with a database schema, the user's original request, a SQL query that failed to execute, and the exact MySQL database error message.
+
+Your task is to fix the SQL query so that it successfully executes on MySQL without errors and correctly fulfills the user request.
+Rules:
+- Respect table names, column names, and foreign keys from the schema.
+- Return ONLY the corrected raw SQL query. No explanations, no markdown fences."""),
+        ("human", """DATABASE SCHEMA:
+{schema}
+
+ORIGINAL REQUEST:
+{question}
+
+FAILED SQL:
+{failed_sql}
+
+MYSQL ERROR MESSAGE:
+{error_message}""")
+    ])
+
+    chain = repair_prompt | _get_llm(temperature=0.0) | StrOutputParser()
+    raw = chain.invoke({
+        "schema": schema,
+        "question": question,
+        "failed_sql": failed_sql,
+        "error_message": error_message,
+    })
+    return clean_sql_output(raw)
