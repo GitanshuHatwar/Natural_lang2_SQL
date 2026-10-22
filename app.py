@@ -1,16 +1,35 @@
 import os
+import io
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from db import get_engine, extract_schema, run_query, validate_and_classify_sql
-from llm import generate_sql, fix_sql, MODEL
+from db import (
+    get_engine,
+    get_available_databases,
+    extract_schema,
+    run_query,
+    validate_and_transform_sql,
+    analyze_query_cost,
+)
+from llm import (
+    generate_sql,
+    explain_sql,
+    fix_sql,
+    get_available_models,
+    DEFAULT_MODEL,
+)
+from security import (
+    sanitize_and_check_prompt,
+    audit_logger,
+    SecurityError,
+)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="NL2SQL AI Copilot",
+    page_title="NL2SQL Enterprise AI Copilot",
     page_icon="💬",
     layout="wide"
 )
@@ -29,6 +48,49 @@ def warning_toast(message: str):
     st.toast(f"{message}", icon="⚠️")
 
 
+# ── Chart & Export Helpers ───────────────────────────────────────────────────
+def generate_excel_bytes(df: pd.DataFrame) -> bytes:
+    """Generate Excel bytes using openpyxl."""
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Query_Results")
+    return buffer.getvalue()
+
+
+def render_intelligent_chart(df: pd.DataFrame):
+    """Automatically render an appropriate chart based on column data types."""
+    if len(df) < 2:
+        return
+
+    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    date_cols = [
+        c for c in df.columns
+        if "date" in c.lower() or "time" in c.lower() or pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
+    categorical_cols = [
+        c for c in df.select_dtypes(include=["object", "string", "category"]).columns
+        if c not in date_cols
+    ]
+
+    with st.expander("📊 Data Visualization", expanded=False):
+        if date_cols and numeric_cols:
+            st.caption(f"📈 Trend Chart ({date_cols[0]} vs {numeric_cols[0]})")
+            try:
+                chart_data = df[[date_cols[0], numeric_cols[0]]].dropna().set_index(date_cols[0])
+                st.line_chart(chart_data, width="stretch")
+            except Exception as e:
+                st.caption(f"Could not render line chart: {e}")
+        elif categorical_cols and numeric_cols:
+            st.caption(f"📊 Bar Chart ({categorical_cols[0]} vs {numeric_cols[0]})")
+            try:
+                chart_data = df[[categorical_cols[0], numeric_cols[0]]].dropna().set_index(categorical_cols[0])
+                st.bar_chart(chart_data, width="stretch")
+            except Exception as e:
+                st.caption(f"Could not render bar chart: {e}")
+        else:
+            st.info("No categorical/date pairs found for automatic charting.")
+
+
 # ── Session State Initialization ─────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
@@ -38,19 +100,35 @@ if "schema" not in st.session_state:
     st.session_state["schema"] = None
 if "database" not in st.session_state:
     st.session_state["database"] = None
+if "username" not in st.session_state:
+    st.session_state["username"] = "appuser"
+if "selected_model" not in st.session_state:
+    st.session_state["selected_model"] = DEFAULT_MODEL
 
 
 # ── Sidebar Controls ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("🤖 NL2SQL Copilot")
-    active_model = os.environ.get("OLLAMA_MODEL") or MODEL
-    st.caption(f"🧠 **Model:** `{active_model}` (Local Ollama)")
+
+    # Dynamic Model Selector
+    available_models = get_available_models()
+    default_idx = 0
+    if st.session_state["selected_model"] in available_models:
+        default_idx = available_models.index(st.session_state["selected_model"])
+
+    selected_model = st.selectbox(
+        "🧠 Active Model (Ollama)",
+        options=available_models,
+        index=default_idx,
+        help="Switch dynamically between locally installed Ollama models.",
+    )
+    st.session_state["selected_model"] = selected_model
 
     st.divider()
     st.subheader("🔌 Connection Status")
 
     if st.session_state["engine"]:
-        st.success(f"Connected to **{st.session_state['database']}**")
+        st.success(f"Connected to **{st.session_state['database']}** as `{st.session_state['username']}`")
         if st.button("🔌 Disconnect Database", width="stretch"):
             for key in ["engine", "database", "schema", "messages"]:
                 st.session_state[key] = None if key != "messages" else []
@@ -64,14 +142,29 @@ with st.sidebar:
                 st.session_state["messages"] = []
                 success_toast("Chat history cleared.")
                 st.rerun()
+
+        # Audit Trail Expander
+        st.divider()
+        with st.expander("📋 Audit Trail (Recent)", expanded=False):
+            try:
+                logs_df = audit_logger.get_recent_logs(limit=10)
+                if not logs_df.empty:
+                    st.dataframe(
+                        logs_df[["timestamp", "statement_type", "status", "rows_affected", "execution_time_ms"]],
+                        width="stretch"
+                    )
+                else:
+                    st.caption("No audit entries yet.")
+            except Exception as e:
+                st.caption(f"Audit log unavailable: {e}")
     else:
         st.info("Not connected to MySQL.")
 
 
 # ── Step 1: Connect to Database ──────────────────────────────────────────────
 if not st.session_state["engine"]:
-    st.title("🗄️ NL2SQL AI Copilot")
-    st.markdown("Connect to your MySQL database to begin conversational querying.")
+    st.title("🗄️ NL2SQL Enterprise Copilot")
+    st.markdown("Connect to your MySQL database to begin conversational data intelligence.")
 
     with st.form("connect_form"):
         col1, col2 = st.columns(2)
@@ -91,6 +184,7 @@ if not st.session_state["engine"]:
                 engine = get_engine(host, int(port), user, password, database)
             st.session_state["engine"] = engine
             st.session_state["database"] = database
+            st.session_state["username"] = user
             success_toast(f"Successfully connected to {database}!")
             st.rerun()
         except Exception as exc:
@@ -102,7 +196,7 @@ if not st.session_state["engine"]:
 # ── Step 2: Extract Schema ───────────────────────────────────────────────────
 if not st.session_state["schema"]:
     st.title(f"🗄️ Connected to `{st.session_state['database']}`")
-    st.info("Extract and ground the database schema to enable SQL query generation.")
+    st.info("Extract and ground the database schema, foreign keys, and masked records.")
 
     if st.button("⚡ Extract & Ground Database Schema", type="primary", width="stretch"):
         try:
@@ -138,26 +232,55 @@ for i, msg in enumerate(st.session_state["messages"]):
             else:
                 st.caption("🔍 **Read Query (`SELECT`)**")
 
+            # Query Explanation Card
+            if msg.get("explanation"):
+                st.info(f"💡 **Explanation:** {msg['explanation']}")
+
             st.code(msg["sql"], language="sql")
 
             # Execution Results
             if msg.get("status") == "success":
                 if category == "DQL" and isinstance(msg.get("data"), pd.DataFrame):
                     df = msg["data"]
-                    st.caption(f"📊 Returned **{len(df):,}** row(s)")
+                    cost_info = msg.get("cost_info", {})
+                    metrics_str = f"📊 Returned **{len(df):,}** row(s) | ⏱️ {msg.get('latency_ms', 0)} ms"
+                    if cost_info.get("query_cost"):
+                        metrics_str += f" | 💰 Cost: {cost_info['query_cost']}"
+                    st.caption(metrics_str)
+
                     st.dataframe(df, width="stretch")
 
-                    # CSV Download
-                    csv_data = df.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        label="📥 Download Results (CSV)",
-                        data=csv_data,
-                        file_name=f"query_result_{i}.csv",
-                        mime="text/csv",
-                        key=f"dl_csv_{i}"
-                    )
+                    # Intelligent Chart
+                    render_intelligent_chart(df)
+
+                    # Export options: CSV & Excel
+                    col_csv, col_xlsx = st.columns(2)
+                    with col_csv:
+                        csv_data = df.to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            label="📥 Download CSV",
+                            data=csv_data,
+                            file_name=f"query_result_{i}.csv",
+                            mime="text/csv",
+                            key=f"dl_csv_{i}",
+                            width="stretch",
+                        )
+                    with col_xlsx:
+                        try:
+                            xlsx_data = generate_excel_bytes(df)
+                            st.download_button(
+                                label="📊 Download Excel (.xlsx)",
+                                data=xlsx_data,
+                                file_name=f"query_result_{i}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_xlsx_{i}",
+                                width="stretch",
+                            )
+                        except Exception:
+                            pass
+
                 elif category == "DML":
-                    st.success(f"✅ {msg.get('message', 'Executed successfully.')}")
+                    st.success(f"✅ {msg.get('message', 'Executed successfully.')} (⏱️ {msg.get('latency_ms', 0)} ms)")
 
             elif msg.get("status") == "error":
                 st.error(f"❌ **Execution Failed:** {msg.get('error')}")
@@ -170,17 +293,32 @@ for i, msg in enumerate(st.session_state["messages"]):
                                 st.session_state["schema"],
                                 msg["sql"],
                                 msg["error"],
-                                msg.get("original_question", "")
+                                msg.get("original_question", ""),
+                                model_name=st.session_state["selected_model"],
                             )
                             # Re-execute repaired SQL
-                            result = run_query(st.session_state["engine"], repaired_sql)
+                            result = run_query(
+                                st.session_state["engine"],
+                                repaired_sql,
+                                username=st.session_state["username"],
+                                database=st.session_state["database"],
+                            )
+                            new_explanation = explain_sql(
+                                st.session_state["schema"],
+                                repaired_sql,
+                                model_name=st.session_state["selected_model"],
+                            )
 
                         st.session_state["messages"][i]["sql"] = repaired_sql
                         st.session_state["messages"][i]["status"] = "success"
                         st.session_state["messages"][i]["error"] = None
                         st.session_state["messages"][i]["category"] = result["type"]
+                        st.session_state["messages"][i]["latency_ms"] = result.get("latency_ms", 0)
+                        st.session_state["messages"][i]["explanation"] = new_explanation
+
                         if result["type"] == "DQL":
                             st.session_state["messages"][i]["data"] = result["data"]
+                            st.session_state["messages"][i]["cost_info"] = result.get("cost_info", {})
                         else:
                             st.session_state["messages"][i]["message"] = result["message"]
 
@@ -193,17 +331,31 @@ for i, msg in enumerate(st.session_state["messages"]):
             # Editable Query Expander
             with st.expander("✏️ Edit & Re-run SQL", expanded=False):
                 edited = st.text_area("SQL Statement", value=msg["sql"], key=f"edit_box_{i}", height=100)
-                if st.button("▶ Re-run Modified Query", key=f"rerun_btn_{i}"):
+                if st.button("▶ Re-run Modified Query", key=f"rerun_btn_{i}", width="stretch"):
                     try:
                         with st.spinner("Executing updated SQL…"):
-                            rerun_res = run_query(st.session_state["engine"], edited)
+                            rerun_res = run_query(
+                                st.session_state["engine"],
+                                edited,
+                                username=st.session_state["username"],
+                                database=st.session_state["database"],
+                            )
+                            rerun_expl = explain_sql(
+                                st.session_state["schema"],
+                                edited,
+                                model_name=st.session_state["selected_model"],
+                            )
 
                         st.session_state["messages"][i]["sql"] = edited
                         st.session_state["messages"][i]["status"] = "success"
                         st.session_state["messages"][i]["error"] = None
                         st.session_state["messages"][i]["category"] = rerun_res["type"]
+                        st.session_state["messages"][i]["latency_ms"] = rerun_res.get("latency_ms", 0)
+                        st.session_state["messages"][i]["explanation"] = rerun_expl
+
                         if rerun_res["type"] == "DQL":
                             st.session_state["messages"][i]["data"] = rerun_res["data"]
+                            st.session_state["messages"][i]["cost_info"] = rerun_res.get("cost_info", {})
                         else:
                             st.session_state["messages"][i]["message"] = rerun_res["message"]
 
@@ -241,13 +393,31 @@ if not st.session_state["messages"]:
 # ── Handle Pending Button Input or Chat Input ────────────────────────────────
 prompt = st.chat_input("Ask a question about your database or instruct an operation...")
 
-# Support quick-click suggested prompts
 if "pending_input" in st.session_state and st.session_state["pending_input"]:
     prompt = st.session_state.pop("pending_input")
 
 
 if prompt:
-    # 1. Append User Message
+    # 1. Security Check against Prompt Injection
+    try:
+        sanitize_and_check_prompt(prompt)
+    except SecurityError as sec_err:
+        error_toast(str(sec_err))
+        st.session_state["messages"].append({
+            "role": "user",
+            "content": prompt,
+        })
+        st.session_state["messages"].append({
+            "role": "assistant",
+            "original_question": prompt,
+            "sql": "-- Blocked by Security Guard",
+            "category": "BLOCKED",
+            "status": "error",
+            "error": str(sec_err),
+        })
+        st.rerun()
+
+    # 2. Append User Message
     st.session_state["messages"].append({
         "role": "user",
         "content": prompt
@@ -263,21 +433,34 @@ if prompt:
             if u_msg.get("role") == "user" and a_msg.get("role") == "assistant" and a_msg.get("sql"):
                 chat_history.append({"question": u_msg["content"], "sql": a_msg["sql"]})
 
-    # 2. Generate and Execute SQL
+    # 3. Generate and Execute SQL
     try:
         with st.spinner("Generating SQL with Ollama…"):
             generated_sql = generate_sql(
                 schema=st.session_state["schema"],
                 question=prompt,
-                history=chat_history
+                history=chat_history,
+                model_name=st.session_state["selected_model"],
             )
 
-        # Validate statement
-        cleaned_sql, category = validate_and_classify_sql(generated_sql)
+        # Validate statement & AST constraints
+        cleaned_sql, category = validate_and_transform_sql(generated_sql)
 
         # Execute statement
         with st.spinner("Executing on MySQL…"):
-            result = run_query(st.session_state["engine"], cleaned_sql)
+            result = run_query(
+                st.session_state["engine"],
+                cleaned_sql,
+                username=st.session_state["username"],
+                database=st.session_state["database"],
+            )
+
+        # Generate friendly plain-English explanation
+        explanation = explain_sql(
+            st.session_state["schema"],
+            cleaned_sql,
+            model_name=st.session_state["selected_model"],
+        )
 
         # Assistant Success Message
         asst_msg = {
@@ -285,10 +468,13 @@ if prompt:
             "original_question": prompt,
             "sql": cleaned_sql,
             "category": category,
+            "explanation": explanation,
             "status": "success",
+            "latency_ms": result.get("latency_ms", 0),
         }
         if category == "DQL":
             asst_msg["data"] = result["data"]
+            asst_msg["cost_info"] = result.get("cost_info", {})
             success_toast(f"Returned {result['rows']:,} row(s)!")
         else:
             asst_msg["message"] = result["message"]

@@ -5,3 +5,6 @@ __pycache__
 myvenv
 venv
 .env
+*.db
+*.sqlite
+audit.log

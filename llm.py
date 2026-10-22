@@ -2,7 +2,8 @@
 
 import os
 import re
-from typing import Optional
+import requests
+from typing import Optional, Any
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,7 +13,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 
-MODEL = os.environ.get("OLLAMA_MODEL") or "qwen2.5-coder:7b"
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL") or "qwen2.5-coder:7b"
+MODEL = DEFAULT_MODEL
 
 _SYSTEM_PROMPT = """You are an expert MySQL database administrator and query generator.
 Using ONLY the tables, columns, and data conventions present in the database schema below, generate ONE valid MySQL query to satisfy the user request.
@@ -38,9 +40,23 @@ SCHEMA:
 {schema}"""
 
 
-def _get_llm(temperature: float = 0.0) -> ChatOllama:
-    model_name = os.environ.get("OLLAMA_MODEL") or "qwen2.5-coder:7b"
-    return ChatOllama(model=model_name, temperature=temperature)
+def get_available_models() -> list[str]:
+    """Fetch locally installed models from Ollama's REST API."""
+    try:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=2.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = [m.get("name") for m in data.get("models", []) if m.get("name")]
+            if models:
+                return models
+    except Exception:
+        pass
+    return [DEFAULT_MODEL]
+
+
+def _get_llm(model_name: Optional[str] = None, temperature: float = 0.0) -> ChatOllama:
+    chosen_model = model_name or os.environ.get("OLLAMA_MODEL") or DEFAULT_MODEL
+    return ChatOllama(model=chosen_model, temperature=temperature)
 
 
 def clean_sql_output(raw: str) -> str:
@@ -52,7 +68,12 @@ def clean_sql_output(raw: str) -> str:
     return cleaned.strip()
 
 
-def generate_sql(schema: str, question: str, history: Optional[list[dict]] = None) -> str:
+def generate_sql(
+    schema: str,
+    question: str,
+    history: Optional[list[dict]] = None,
+    model_name: Optional[str] = None,
+) -> str:
     """
     Send schema + question + optional conversation history to Ollama and return a clean SQL string.
     """
@@ -67,12 +88,40 @@ def generate_sql(schema: str, question: str, history: Optional[list[dict]] = Non
 
     messages.append(HumanMessage(content=question))
 
-    llm = _get_llm(temperature=0.0)
+    llm = _get_llm(model_name=model_name, temperature=0.0)
     response = llm.invoke(messages)
     return clean_sql_output(response.content)
 
 
-def fix_sql(schema: str, failed_sql: str, error_message: str, question: str) -> str:
+def explain_sql(schema: str, sql: str, model_name: Optional[str] = None) -> str:
+    """
+    Provide a concise, friendly 1-2 sentence plain-English explanation
+    of what the SQL query does and which tables/conditions it uses.
+    """
+    explain_prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a helpful database teacher. Provide a concise, clear 1-2 sentence explanation
+of what this SQL query calculates, displays, or modifies. Mention the key tables and filters in plain English.
+Do not output SQL, code blocks, or preamble."""),
+        ("human", """DATABASE SCHEMA:
+{schema}
+
+SQL QUERY:
+{sql}""")
+    ])
+    chain = explain_prompt | _get_llm(model_name=model_name, temperature=0.0) | StrOutputParser()
+    try:
+        return chain.invoke({"schema": schema, "sql": sql}).strip()
+    except Exception as e:
+        return f"Executes query on active database ({e})"
+
+
+def fix_sql(
+    schema: str,
+    failed_sql: str,
+    error_message: str,
+    question: str,
+    model_name: Optional[str] = None,
+) -> str:
     """
     Self-healing: Given a failed SQL query and the exact MySQL error message,
     prompts the LLM to analyze the schema and output a corrected query.
@@ -97,7 +146,7 @@ MYSQL ERROR MESSAGE:
 {error_message}""")
     ])
 
-    chain = repair_prompt | _get_llm(temperature=0.0) | StrOutputParser()
+    chain = repair_prompt | _get_llm(model_name=model_name, temperature=0.0) | StrOutputParser()
     raw = chain.invoke({
         "schema": schema,
         "question": question,

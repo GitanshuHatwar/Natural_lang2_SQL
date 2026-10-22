@@ -7,3 +7,5 @@ langchain-ollama
 python-dotenv
 sqlparse
 sqlglot
+openpyxl
+networkx
