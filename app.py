@@ -26,6 +26,7 @@ from security import (
     audit_logger,
     SecurityError,
 )
+from chat_store import chat_store
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -104,6 +105,22 @@ if "username" not in st.session_state:
     st.session_state["username"] = "appuser"
 if "selected_model" not in st.session_state:
     st.session_state["selected_model"] = DEFAULT_MODEL
+if "active_session_id" not in st.session_state:
+    st.session_state["active_session_id"] = None
+if "draft_prompt" not in st.session_state:
+    st.session_state["draft_prompt"] = None
+
+
+# ── Synchronize Active Session Messages ──────────────────────────────────────
+if st.session_state["database"] and not st.session_state["active_session_id"]:
+    sessions = chat_store.list_sessions(st.session_state["database"])
+    if sessions:
+        st.session_state["active_session_id"] = sessions[0]["session_id"]
+    else:
+        st.session_state["active_session_id"] = chat_store.create_session(
+            st.session_state["database"], "New Conversation"
+        )
+    st.session_state["messages"] = chat_store.get_session_messages(st.session_state["active_session_id"])
 
 
 # ── Sidebar Controls ─────────────────────────────────────────────────────────
@@ -130,18 +147,46 @@ with st.sidebar:
     if st.session_state["engine"]:
         st.success(f"Connected to **{st.session_state['database']}** as `{st.session_state['username']}`")
         if st.button("🔌 Disconnect Database", width="stretch"):
-            for key in ["engine", "database", "schema", "messages"]:
+            for key in ["engine", "database", "schema", "messages", "active_session_id", "draft_prompt"]:
                 st.session_state[key] = None if key != "messages" else []
             success_toast("Disconnected from database.")
             st.rerun()
 
         st.divider()
-        st.subheader("💬 Chat Options")
-        if st.session_state["messages"]:
-            if st.button("🗑️ Clear Conversation", width="stretch"):
-                st.session_state["messages"] = []
-                success_toast("Chat history cleared.")
-                st.rerun()
+        st.subheader("💬 Local Chat Sessions")
+
+        # Start New Chat Button
+        if st.button("➕ New Chat", type="primary", width="stretch"):
+            new_id = chat_store.create_session(st.session_state["database"], "New Conversation")
+            st.session_state["active_session_id"] = new_id
+            st.session_state["messages"] = []
+            st.session_state["draft_prompt"] = None
+            success_toast("Started a new conversation.")
+            st.rerun()
+
+        # List existing sessions from local SQLite store
+        sessions = chat_store.list_sessions(st.session_state["database"])
+        for s in sessions:
+            s_id = s["session_id"]
+            is_active = (s_id == st.session_state["active_session_id"])
+            label_prefix = "👉 " if is_active else "💬 "
+            btn_label = f"{label_prefix}{s['title'][:25]}"
+
+            col_s_btn, col_s_del = st.columns([5, 1])
+            with col_s_btn:
+                if st.button(btn_label, key=f"session_btn_{s_id}", width="stretch", disabled=is_active):
+                    st.session_state["active_session_id"] = s_id
+                    st.session_state["messages"] = chat_store.get_session_messages(s_id)
+                    st.session_state["draft_prompt"] = None
+                    st.rerun()
+            with col_s_del:
+                if st.button("🗑️", key=f"session_del_{s_id}", help="Delete this chat"):
+                    chat_store.delete_session(s_id)
+                    if st.session_state["active_session_id"] == s_id:
+                        st.session_state["active_session_id"] = None
+                        st.session_state["messages"] = []
+                    success_toast("Chat deleted.")
+                    st.rerun()
 
         # Audit Trail Expander
         st.divider()
@@ -322,6 +367,8 @@ for i, msg in enumerate(st.session_state["messages"]):
                         else:
                             st.session_state["messages"][i]["message"] = result["message"]
 
+                        # Persist repaired message
+                        chat_store.save_message(st.session_state["active_session_id"], st.session_state["messages"][i])
                         success_toast("Query repaired and executed successfully!")
                         st.rerun()
                     except Exception as fix_exc:
@@ -359,6 +406,8 @@ for i, msg in enumerate(st.session_state["messages"]):
                         else:
                             st.session_state["messages"][i]["message"] = rerun_res["message"]
 
+                        # Persist rerun message
+                        chat_store.save_message(st.session_state["active_session_id"], st.session_state["messages"][i])
                         success_toast("Updated query executed successfully!")
                         st.rerun()
                     except Exception as rerun_exc:
@@ -369,59 +418,96 @@ for i, msg in enumerate(st.session_state["messages"]):
 
 
 # ── Empty State: Suggested Prompts ───────────────────────────────────────────
-if not st.session_state["messages"]:
-    st.markdown("### 💡 What would you like to query?")
-    st.markdown("Type a question below or click any of these quick examples:")
+if not st.session_state["messages"] and not st.session_state.get("draft_prompt"):
+    st.markdown("### 💡 Quick Starters")
+    st.caption("Click any template below to load and customize it for your needs:")
 
     col_a, col_b = st.columns(2)
     with col_a:
         if st.button("🔍 Show all customers from Pune", width="stretch"):
-            st.session_state["pending_input"] = "Show all customers from Pune"
+            st.session_state["draft_prompt"] = "Show all customers from Pune"
             st.rerun()
         if st.button("💰 Total revenue from completed orders", width="stretch"):
-            st.session_state["pending_input"] = "What is the total revenue from completed orders?"
+            st.session_state["draft_prompt"] = "What is the total revenue from completed orders?"
             st.rerun()
     with col_b:
         if st.button("📦 Which products cost more than $50?", width="stretch"):
-            st.session_state["pending_input"] = "Which products cost more than $50?"
+            st.session_state["draft_prompt"] = "Which products cost more than $50?"
             st.rerun()
         if st.button("➕ Add customer Chhagan Batliwala (Pune)", width="stretch"):
-            st.session_state["pending_input"] = "add one more entry in customers table for chhagan batliwala, email is chhagan@gmail.com, location pune."
+            st.session_state["draft_prompt"] = "add one more entry in customers table for chhagan batliwala, email is chhagan@gmail.com, location pune."
             st.rerun()
 
 
-# ── Handle Pending Button Input or Chat Input ────────────────────────────────
-prompt = st.chat_input("Ask a question about your database or instruct an operation...")
+# ── Interactive Prompt Verification & Customization Card ─────────────────────
+execute_prompt_text = None
 
-if "pending_input" in st.session_state and st.session_state["pending_input"]:
-    prompt = st.session_state.pop("pending_input")
+if st.session_state.get("draft_prompt"):
+    st.divider()
+    with st.container():
+        st.markdown("### ✏️ Verify & Customize Query Prompt")
+        st.info("Review or modify the template question below according to your exact use case before sending:")
 
+        edited_draft = st.text_area(
+            "Prompt Template",
+            value=st.session_state["draft_prompt"],
+            height=85,
+            key="draft_editor_area",
+            label_visibility="collapsed"
+        )
+
+        col_run, col_cancel = st.columns([2, 5])
+        with col_run:
+            if st.button("🚀 Send to Copilot", type="primary", width="stretch"):
+                execute_prompt_text = edited_draft.strip()
+                st.session_state["draft_prompt"] = None
+        with col_cancel:
+            if st.button("❌ Cancel", width="stretch"):
+                st.session_state["draft_prompt"] = None
+                st.rerun()
+
+
+# ── Handle Input: Chat Input or Verified Draft Prompt ────────────────────────
+chat_input_val = st.chat_input("Ask a question about your database or instruct an operation...")
+
+prompt = execute_prompt_text or chat_input_val
 
 if prompt:
+    # Ensure an active session exists
+    if not st.session_state["active_session_id"]:
+        st.session_state["active_session_id"] = chat_store.create_session(
+            st.session_state["database"], "New Conversation"
+        )
+
     # 1. Security Check against Prompt Injection
     try:
         sanitize_and_check_prompt(prompt)
     except SecurityError as sec_err:
         error_toast(str(sec_err))
-        st.session_state["messages"].append({
-            "role": "user",
-            "content": prompt,
-        })
-        st.session_state["messages"].append({
+        user_err_msg = {"role": "user", "content": prompt}
+        asst_err_msg = {
             "role": "assistant",
             "original_question": prompt,
             "sql": "-- Blocked by Security Guard",
             "category": "BLOCKED",
             "status": "error",
             "error": str(sec_err),
-        })
+        }
+        st.session_state["messages"].append(user_err_msg)
+        st.session_state["messages"].append(asst_err_msg)
+        chat_store.save_message(st.session_state["active_session_id"], user_err_msg)
+        chat_store.save_message(st.session_state["active_session_id"], asst_err_msg)
         st.rerun()
 
     # 2. Append User Message
-    st.session_state["messages"].append({
-        "role": "user",
-        "content": prompt
-    })
+    user_msg = {"role": "user", "content": prompt}
+    st.session_state["messages"].append(user_msg)
+    chat_store.save_message(st.session_state["active_session_id"], user_msg)
+
+    # Auto-rename session title based on the first question
+    if len(st.session_state["messages"]) <= 2:
+        title_snippet = prompt[:35] + ("…" if len(prompt) > 35 else "")
+        chat_store.update_session_title(st.session_state["active_session_id"], title_snippet)
 
     # Prepare conversation history for multi-turn prompt
     chat_history = []
@@ -481,19 +567,22 @@ if prompt:
             success_toast(result["message"])
 
         st.session_state["messages"].append(asst_msg)
+        chat_store.save_message(st.session_state["active_session_id"], asst_msg)
 
     except Exception as exc:
         error_msg = str(exc)
         error_toast(f"Failed: {error_msg}")
 
         # Assistant Error Message with Auto-Fix Option
-        st.session_state["messages"].append({
+        err_asst_msg = {
             "role": "assistant",
             "original_question": prompt,
             "sql": locals().get("generated_sql", "-- Could not generate query"),
             "category": locals().get("category", "DQL"),
             "status": "error",
             "error": error_msg,
-        })
+        }
+        st.session_state["messages"].append(err_asst_msg)
+        chat_store.save_message(st.session_state["active_session_id"], err_asst_msg)
 
     st.rerun()
