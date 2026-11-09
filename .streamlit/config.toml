@@ -5,3 +5,55 @@ gatherUsageStats = false
 headless = true
 enableCORS = true
 enableXsrfProtection = true
+
+[theme]
+base = "light"
+primaryColor = "#1B4D3E"
+backgroundColor = "#FAF8F5"
+secondaryBackgroundColor = "#EFEAE1"
+textColor = "#192823"
+
+# Semantic & Accents
+linkColor = "#1B4D3E"
+codeTextColor = "#153E32"
+codeBackgroundColor = "#EDE7DC"
+borderColor = "#DCD5C9"
+
+greenColor = "#1B4D3E"
+greenBackgroundColor = "#E2EFE9"
+greenTextColor = "#153E32"
+
+# Typography
+font = "'Plus Jakarta Sans':https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'Playfair Display':https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,400;1,600&display=swap"
+baseFontSize = 15
+baseFontWeight = 400
+headingFontSizes = ["32px", "24px", "20px", "16px", "14px", "12px"]
+headingFontWeights = [700, 600, 600, 600, 500, 500]
+
+# Border and radius
+baseRadius = "14px"
+buttonRadius = "full"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# Content padding
+paddingTop = "1.5rem"
+paddingBottom = "2.5rem"
+
+# Dataframe styling
+dataframeBorderColor = "#DCD5C9"
+dataframeHeaderBackgroundColor = "#1B4D3E"
+dataframeHeaderTextColor = "#FFFFFF"
+
+# Charts - Dark green, sage, warm gold, forest slate
+chartCategoricalColors = ["#1B4D3E", "#3D7A66", "#7FA99B", "#C29B38", "#4A6B5D", "#8C7A6B", "#2A5243"]
+
+[theme.sidebar]
+backgroundColor = "#F4EFE6"
+secondaryBackgroundColor = "#E7DFD2"
+textColor = "#192823"
+borderColor = "#DCD5C9"
+primaryColor = "#1B4D3E"
+linkColor = "#1B4D3E"
+showWidgetBorder = true

@@ -31,7 +31,7 @@ from chat_store import chat_store
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="NL2SQL Enterprise AI Copilot",
-    page_icon="💬",
+    page_icon="🌿",
     layout="wide"
 )
 
@@ -125,7 +125,8 @@ if st.session_state["database"] and not st.session_state["active_session_id"]:
 
 # ── Sidebar Controls ─────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("🤖 NL2SQL Copilot")
+    st.markdown("### 🌿 NL2SQL Copilot")
+    st.caption("Enterprise AI-Assisted Database Intelligence")
 
     # Dynamic Model Selector
     available_models = get_available_models()
@@ -142,21 +143,24 @@ with st.sidebar:
     st.session_state["selected_model"] = selected_model
 
     st.divider()
-    st.subheader("🔌 Connection Status")
 
     if st.session_state["engine"]:
-        st.success(f"Connected to **{st.session_state['database']}** as `{st.session_state['username']}`")
-        if st.button("🔌 Disconnect Database", width="stretch"):
+        st.success(
+            f"Connected to **{st.session_state['database']}**",
+            icon=":material/check_circle:",
+        )
+        st.caption(f"Authenticated as: `{st.session_state['username']}`")
+        if st.button("Disconnect", icon=":material/link_off:", width="stretch"):
             for key in ["engine", "database", "schema", "messages", "active_session_id", "draft_prompt"]:
                 st.session_state[key] = None if key != "messages" else []
             success_toast("Disconnected from database.")
             st.rerun()
 
         st.divider()
-        st.subheader("💬 Local Chat Sessions")
+        st.subheader("💬 Conversations")
 
         # Start New Chat Button
-        if st.button("➕ New Chat", type="primary", width="stretch"):
+        if st.button("New Chat", type="primary", icon=":material/add:", width="stretch"):
             new_id = chat_store.create_session(st.session_state["database"], "New Conversation")
             st.session_state["active_session_id"] = new_id
             st.session_state["messages"] = []
@@ -169,18 +173,18 @@ with st.sidebar:
         for s in sessions:
             s_id = s["session_id"]
             is_active = (s_id == st.session_state["active_session_id"])
-            label_prefix = "👉 " if is_active else "💬 "
-            btn_label = f"{label_prefix}{s['title'][:25]}"
+            btn_label = s['title'][:22]
 
             col_s_btn, col_s_del = st.columns([5, 1])
             with col_s_btn:
-                if st.button(btn_label, key=f"session_btn_{s_id}", width="stretch", disabled=is_active):
+                btn_icon = ":material/arrow_right_alt:" if is_active else ":material/chat_bubble:"
+                if st.button(btn_label, key=f"session_btn_{s_id}", icon=btn_icon, width="stretch", disabled=is_active):
                     st.session_state["active_session_id"] = s_id
                     st.session_state["messages"] = chat_store.get_session_messages(s_id)
                     st.session_state["draft_prompt"] = None
                     st.rerun()
             with col_s_del:
-                if st.button("🗑️", key=f"session_del_{s_id}", help="Delete this chat"):
+                if st.button("✕", key=f"session_del_{s_id}", help="Delete this chat"):
                     chat_store.delete_session(s_id)
                     if st.session_state["active_session_id"] == s_id:
                         st.session_state["active_session_id"] = None
@@ -190,7 +194,7 @@ with st.sidebar:
 
         # Audit Trail Expander
         st.divider()
-        with st.expander("📋 Audit Trail (Recent)", expanded=False):
+        with st.expander(":material/history: Audit Trail (Recent)", expanded=False):
             try:
                 logs_df = audit_logger.get_recent_logs(limit=10)
                 if not logs_df.empty:
@@ -203,25 +207,76 @@ with st.sidebar:
             except Exception as e:
                 st.caption(f"Audit log unavailable: {e}")
     else:
-        st.info("Not connected to MySQL.")
+        st.info("MySQL connection offline.", icon=":material/info:")
 
 
 # ── Step 1: Connect to Database ──────────────────────────────────────────────
 if not st.session_state["engine"]:
-    st.title("🗄️ NL2SQL Enterprise Copilot")
-    st.markdown("Connect to your MySQL database to begin conversational data intelligence.")
+    # Top announcement pill matching reference aesthetic
+    st.html(
+        """
+        <div style="background-color: #1B4D3E; color: #FFFFFF; padding: 8px 18px; border-radius: 9999px; text-align: center; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.02em; margin-bottom: 2rem;">
+            🔒 Enterprise Privacy Mode &nbsp;•&nbsp; 100% Offline Local AI &nbsp;•&nbsp; Direct MySQL Engine
+        </div>
+        """
+    )
 
-    with st.form("connect_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            host = st.text_input("Host", value="localhost")
-            port = st.number_input("Port", value=3306, step=1, min_value=1, max_value=65535)
-            database = st.text_input("Database", value="ecommerce_db")
-        with col2:
-            user = st.text_input("User", value="appuser")
-            password = st.text_input("Password", type="password", value="Password123!")
+    # Hero headline matching reference image
+    st.markdown(
+        """
+        <div style="text-align: center; margin-bottom: 2rem;">
+            <h1 style="font-size: 2.8rem; font-weight: 700; margin-bottom: 0.8rem; color: #192823; line-height: 1.2;">
+                The <em style="font-style: italic; color: #1B4D3E;">sweet spot</em> for enterprise database queries.
+            </h1>
+            <p style="font-size: 1.15rem; color: #4A5B53; max-width: 680px; margin: 0 auto 1.8rem auto; line-height: 1.6;">
+                Anyone can explore databases with natural language. We make sure every query is verified, secure, and blazing fast.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        submitted = st.form_submit_button("Connect to Database", type="primary", width="stretch")
+    # Laurel-style feature cards
+    col_v1, col_v2, col_v3 = st.columns(3)
+    with col_v1:
+        with st.container(border=True):
+            st.caption("PRIVACY ASSURED")
+            st.markdown("### 🛡️ 100% Local")
+            st.caption("Zero cloud leaks with local Ollama models.")
+    with col_v2:
+        with st.container(border=True):
+            st.caption("PERFORMANCE")
+            st.markdown("### ⚡ < 500ms")
+            st.caption("Direct MySQL connection & optimized execution.")
+    with col_v3:
+        with st.container(border=True):
+            st.caption("SECURITY")
+            st.markdown("### 🔒 Guardrails")
+            st.caption("Strict AST verification and DML confirmation.")
+
+    st.write("")
+
+    # Form card
+    with st.container(border=True):
+        st.subheader(":material/database: Connect to Database")
+        st.caption("Enter your MySQL credentials to initialize your conversational intelligence workspace.")
+
+        with st.form("connect_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                host = st.text_input("Host", value="localhost")
+                port = st.number_input("Port", value=3306, step=1, min_value=1, max_value=65535)
+                database = st.text_input("Database", value="ecommerce_db")
+            with col2:
+                user = st.text_input("User", value="appuser")
+                password = st.text_input("Password", type="password", value="Password123!")
+
+            submitted = st.form_submit_button(
+                "Connect to Database",
+                type="primary",
+                icon=":material/arrow_forward:",
+                width="stretch",
+            )
 
     if submitted:
         try:
@@ -240,27 +295,57 @@ if not st.session_state["engine"]:
 
 # ── Step 2: Extract Schema ───────────────────────────────────────────────────
 if not st.session_state["schema"]:
-    st.title(f"🗄️ Connected to `{st.session_state['database']}`")
-    st.info("Extract and ground the database schema, foreign keys, and masked records.")
+    st.html(
+        """
+        <div style="background-color: #1B4D3E; color: #FFFFFF; padding: 8px 18px; border-radius: 9999px; text-align: center; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.02em; margin-bottom: 2rem;">
+            ✅ Database Connected &nbsp;•&nbsp; Schema Grounding Required
+        </div>
+        """
+    )
 
-    if st.button("⚡ Extract & Ground Database Schema", type="primary", width="stretch"):
-        try:
-            with st.spinner("Extracting table definitions, foreign keys, and sample records…"):
-                schema = extract_schema(st.session_state["engine"], st.session_state["database"])
-            st.session_state["schema"] = schema
-            success_toast("Schema extracted and grounded successfully!")
-            st.rerun()
-        except Exception as exc:
-            error_toast(f"Schema extraction failed: {exc}")
-            st.error(f"❌ Schema extraction error: {exc}")
+    with st.container(border=True):
+        st.subheader(f":material/schema: Ground Schema for `{st.session_state['database']}`")
+        st.markdown(
+            "Extract table structures, data types, primary & foreign key relationships, and masked records "
+            "so the local AI model can generate precise SQL statements."
+        )
+
+        if st.button(
+            "Extract & Ground Database Schema",
+            type="primary",
+            icon=":material/bolt:",
+            width="stretch",
+        ):
+            try:
+                with st.spinner("Extracting table definitions, foreign keys, and sample records…"):
+                    schema = extract_schema(st.session_state["engine"], st.session_state["database"])
+                st.session_state["schema"] = schema
+                success_toast("Schema extracted and grounded successfully!")
+                st.rerun()
+            except Exception as exc:
+                error_toast(f"Schema extraction failed: {exc}")
+                st.error(f"❌ Schema extraction error: {exc}")
     st.stop()
 
 
 # ── Main Chat Interface ──────────────────────────────────────────────────────
-st.title(f"💬 NL2SQL Copilot — `{st.session_state['database']}`")
+st.html(
+    f"""
+    <div style="background-color: #1B4D3E; color: #FFFFFF; padding: 10px 22px; border-radius: 9999px; display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem; font-weight: 500; margin-bottom: 1.5rem;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.1rem;">🌿</span>
+            <span><strong>NL2SQL Copilot</strong> &nbsp;|&nbsp; Database: <code>{st.session_state['database']}</code></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px; font-size: 0.82rem; opacity: 0.92;">
+            <span>🧠 <code>{st.session_state['selected_model']}</code></span>
+            <span>👤 <code>{st.session_state['username']}</code></span>
+        </div>
+    </div>
+    """
+)
 
 # Collapsible schema summary
-with st.expander("📋 View Active Database Schema & Grounding Data", expanded=False):
+with st.expander(":material/schema: View Active Database Schema & Grounding Data", expanded=False):
     st.code(st.session_state["schema"], language="text")
 
 # ── Render Chat Message History ──────────────────────────────────────────────
@@ -273,13 +358,17 @@ for i, msg in enumerate(st.session_state["messages"]):
         with st.chat_message("assistant", avatar="🤖"):
             category = msg.get("category", "DQL")
             if category == "DML":
-                st.warning("⚠️ **Data Modification Operation (`INSERT` / `UPDATE` / `DELETE`)**")
+                st.warning(
+                    "This operation will modify database records (`INSERT` / `UPDATE` / `DELETE`).",
+                    title="Data Modification Operation",
+                    icon=":material/warning:",
+                )
             else:
-                st.caption("🔍 **Read Query (`SELECT`)**")
+                st.caption("🔍 Read Query (`SELECT`)")
 
             # Query Explanation Card
             if msg.get("explanation"):
-                st.info(f"💡 **Explanation:** {msg['explanation']}")
+                st.info(msg["explanation"], title="Query Explanation", icon=":material/lightbulb:")
 
             st.code(msg["sql"], language="sql")
 
@@ -288,9 +377,9 @@ for i, msg in enumerate(st.session_state["messages"]):
                 if category == "DQL" and isinstance(msg.get("data"), pd.DataFrame):
                     df = msg["data"]
                     cost_info = msg.get("cost_info", {})
-                    metrics_str = f"📊 Returned **{len(df):,}** row(s) | ⏱️ {msg.get('latency_ms', 0)} ms"
+                    metrics_str = f"📊 Returned **{len(df):,}** row(s) &nbsp;|&nbsp; ⏱️ {msg.get('latency_ms', 0)} ms"
                     if cost_info.get("query_cost"):
-                        metrics_str += f" | 💰 Cost: {cost_info['query_cost']}"
+                        metrics_str += f" &nbsp;|&nbsp; 💰 Cost: {cost_info['query_cost']}"
                     st.caption(metrics_str)
 
                     st.dataframe(df, width="stretch")
@@ -303,35 +392,40 @@ for i, msg in enumerate(st.session_state["messages"]):
                     with col_csv:
                         csv_data = df.to_csv(index=False).encode("utf-8")
                         st.download_button(
-                            label="📥 Download CSV",
+                            label="Download CSV",
                             data=csv_data,
                             file_name=f"query_result_{i}.csv",
                             mime="text/csv",
                             key=f"dl_csv_{i}",
+                            icon=":material/download:",
                             width="stretch",
                         )
                     with col_xlsx:
                         try:
                             xlsx_data = generate_excel_bytes(df)
                             st.download_button(
-                                label="📊 Download Excel (.xlsx)",
+                                label="Download Excel (.xlsx)",
                                 data=xlsx_data,
                                 file_name=f"query_result_{i}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key=f"dl_xlsx_{i}",
+                                icon=":material/table_view:",
                                 width="stretch",
                             )
                         except Exception:
                             pass
 
                 elif category == "DML":
-                    st.success(f"✅ {msg.get('message', 'Executed successfully.')} (⏱️ {msg.get('latency_ms', 0)} ms)")
+                    st.success(
+                        f"{msg.get('message', 'Executed successfully.')} (⏱️ {msg.get('latency_ms', 0)} ms)",
+                        icon=":material/check_circle:",
+                    )
 
             elif msg.get("status") == "error":
-                st.error(f"❌ **Execution Failed:** {msg.get('error')}")
+                st.error(f"**Execution Failed:** {msg.get('error')}", icon=":material/error:")
 
                 # Auto-Fix Button
-                if st.button("🔧 Auto-Fix with Ollama", key=f"autofix_{i}"):
+                if st.button("Auto-Fix with Ollama", type="primary", icon=":material/build:", key=f"autofix_{i}"):
                     try:
                         with st.spinner("Ollama is analyzing the error and repairing SQL…"):
                             repaired_sql = fix_sql(
@@ -376,9 +470,9 @@ for i, msg in enumerate(st.session_state["messages"]):
                         st.error(f"Auto-fix failed: {fix_exc}")
 
             # Editable Query Expander
-            with st.expander("✏️ Edit & Re-run SQL", expanded=False):
+            with st.expander(":material/edit: Edit & Re-run SQL", expanded=False):
                 edited = st.text_area("SQL Statement", value=msg["sql"], key=f"edit_box_{i}", height=100)
-                if st.button("▶ Re-run Modified Query", key=f"rerun_btn_{i}", width="stretch"):
+                if st.button("Re-run Modified Query", icon=":material/play_arrow:", key=f"rerun_btn_{i}", width="stretch"):
                     try:
                         with st.spinner("Executing updated SQL…"):
                             rerun_res = run_query(
@@ -419,24 +513,25 @@ for i, msg in enumerate(st.session_state["messages"]):
 
 # ── Empty State: Suggested Prompts ───────────────────────────────────────────
 if not st.session_state["messages"] and not st.session_state.get("draft_prompt"):
-    st.markdown("### 💡 Quick Starters")
-    st.caption("Click any template below to load and customize it for your needs:")
+    with st.container(border=True):
+        st.subheader(":material/lightbulb: Quick Starters")
+        st.caption("Click any template below to load and customize it for your needs:")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if st.button("🔍 Show all customers from Pune", width="stretch"):
-            st.session_state["draft_prompt"] = "Show all customers from Pune"
-            st.rerun()
-        if st.button("💰 Total revenue from completed orders", width="stretch"):
-            st.session_state["draft_prompt"] = "What is the total revenue from completed orders?"
-            st.rerun()
-    with col_b:
-        if st.button("📦 Which products cost more than $50?", width="stretch"):
-            st.session_state["draft_prompt"] = "Which products cost more than $50?"
-            st.rerun()
-        if st.button("➕ Add customer Chhagan Batliwala (Pune)", width="stretch"):
-            st.session_state["draft_prompt"] = "add one more entry in customers table for chhagan batliwala, email is chhagan@gmail.com, location pune."
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Show all customers from Pune", icon=":material/search:", width="stretch"):
+                st.session_state["draft_prompt"] = "Show all customers from Pune"
+                st.rerun()
+            if st.button("Total revenue from completed orders", icon=":material/payments:", width="stretch"):
+                st.session_state["draft_prompt"] = "What is the total revenue from completed orders?"
+                st.rerun()
+        with col_b:
+            if st.button("Which products cost more than $50?", icon=":material/inventory_2:", width="stretch"):
+                st.session_state["draft_prompt"] = "Which products cost more than $50?"
+                st.rerun()
+            if st.button("Add customer Chhagan Batliwala (Pune)", icon=":material/person_add:", width="stretch"):
+                st.session_state["draft_prompt"] = "add one more entry in customers table for chhagan batliwala, email is chhagan@gmail.com, location pune."
+                st.rerun()
 
 
 # ── Interactive Prompt Verification & Customization Card ─────────────────────
@@ -444,9 +539,9 @@ execute_prompt_text = None
 
 if st.session_state.get("draft_prompt"):
     st.divider()
-    with st.container():
-        st.markdown("### ✏️ Verify & Customize Query Prompt")
-        st.info("Review or modify the template question below according to your exact use case before sending:")
+    with st.container(border=True):
+        st.subheader(":material/edit_note: Verify & Customize Query Prompt")
+        st.caption("Review or modify the template question below according to your exact use case before sending:")
 
         edited_draft = st.text_area(
             "Prompt Template",
@@ -458,11 +553,11 @@ if st.session_state.get("draft_prompt"):
 
         col_run, col_cancel = st.columns([2, 5])
         with col_run:
-            if st.button("🚀 Send to Copilot", type="primary", width="stretch"):
+            if st.button("Send to Copilot", type="primary", icon=":material/send:", width="stretch"):
                 execute_prompt_text = edited_draft.strip()
                 st.session_state["draft_prompt"] = None
         with col_cancel:
-            if st.button("❌ Cancel", width="stretch"):
+            if st.button("Cancel", icon=":material/close:", width="stretch"):
                 st.session_state["draft_prompt"] = None
                 st.rerun()
 
