@@ -9,21 +9,22 @@ export type Turn = {
   status: ChatStatus; error: string | null; rowCount: number | null;
   result: { columns: string[]; rows: Cell[][]; truncated: boolean; retried: boolean } | null;
   summaries: (SummaryRecord & { note?: string })[];
-  running: boolean; summarizing: SummaryMode | null; notice: string | null;
+  running: boolean; summarizing: SummaryMode | null; notice: string | null; confirmation: string | null;
 };
 
 type Props = {
   turn: Turn;
-  onRun: (chatId: number, sql: string) => void;
+  onRun: (chatId: number, sql: string, confirmed?: boolean) => void;
   onSummarize: (chatId: number, mode: SummaryMode) => void;
   onSqlChange: (chatId: number, sql: string) => void;
+  onDismissWarning: (chatId: number) => void;
 };
 
 function statusVariant(status: ChatStatus): "neutral" | "success" | "danger" {
   return status === "executed" ? "success" : status === "error" ? "danger" : "neutral";
 }
 
-export function ChatTurn({ turn, onRun, onSummarize, onSqlChange }: Props): JSX.Element {
+export function ChatTurn({ turn, onRun, onSummarize, onSqlChange, onDismissWarning }: Props): JSX.Element {
   const editor = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     const element = editor.current;
@@ -42,11 +43,12 @@ export function ChatTurn({ turn, onRun, onSummarize, onSqlChange }: Props): JSX.
       </div>
       {turn.error && <Alert className="mt-3">{turn.error}</Alert>}
       {turn.notice && <div className="mt-3">{turn.notice === "Generating SQL…" ? <Spinner label={turn.notice} elapsed /> : <Alert variant="info">{turn.notice}</Alert>}</div>}
+      {turn.confirmation && <Alert variant="warning" className="mt-3"><div>{turn.confirmation}</div><div className="mt-2 flex gap-2"><Button variant="secondary" onClick={() => onRun(turn.chatId, turn.sql, true)}>I understand, run query</Button><Button variant="ghost" onClick={() => onDismissWarning(turn.chatId)}>Cancel</Button></div></Alert>}
       {turn.result?.retried && <p className="mt-3 text-xs text-muted">The first attempt failed, so the model corrected the query once. Showing the SQL that ran.</p>}
-      {turn.result && <div className="mt-3 space-y-2"><ResultTable columns={turn.result.columns} rows={turn.result.rows} />{turn.result.truncated && <p className="text-xs text-muted">Result truncated. Showing the first {turn.rowCount} rows.</p>}</div>}
+      {turn.result && <div className="mt-3 space-y-2">{turn.result.columns.length > 0 ? <ResultTable columns={turn.result.columns} rows={turn.result.rows} /> : <p className="text-xs text-muted">Query executed. {turn.rowCount} rows affected.</p>}{turn.result.truncated && <p className="text-xs text-muted">Result truncated. Showing the first {turn.rowCount} rows.</p>}</div>}
       {turn.status === "executed" && !turn.result && <p className="mt-3 text-xs text-muted">This query ran earlier ({turn.rowCount} rows). Run again to view the rows.</p>}
     </Card>
-    {turn.executedSql !== null && <div className="flex gap-2"><Button variant="secondary" title="Uses the last query that ran successfully." disabled={turn.summarizing !== null} loading={turn.summarizing === "summary"} onClick={() => onSummarize(turn.chatId, "summary")}><Sparkles className="size-3.5" />Summarize</Button><Button variant="secondary" title="Uses the last query that ran successfully." disabled={turn.summarizing !== null} loading={turn.summarizing === "analysis"} onClick={() => onSummarize(turn.chatId, "analysis")}><ChartNoAxesColumn className="size-3.5" />Analyze</Button></div>}
+    {turn.executedSql !== null && /^(select|with)\b/i.test(turn.executedSql.trim()) && <div className="flex gap-2"><Button variant="secondary" title="Uses the last query that ran successfully." disabled={turn.summarizing !== null} loading={turn.summarizing === "summary"} onClick={() => onSummarize(turn.chatId, "summary")}><Sparkles className="size-3.5" />Summarize</Button><Button variant="secondary" title="Uses the last query that ran successfully." disabled={turn.summarizing !== null} loading={turn.summarizing === "analysis"} onClick={() => onSummarize(turn.chatId, "analysis")}><ChartNoAxesColumn className="size-3.5" />Analyze</Button></div>}
     {turn.summaries.map((summary) => <Card key={summary.id} className="p-3"><div className="mb-2 text-xs text-muted">{summary.kind === "summary" ? "Summary" : "Analysis"} · {new Date(summary.created_at).toLocaleString()}</div><div className="whitespace-pre-wrap leading-relaxed">{summary.text}</div>{summary.note && <div className="mt-2 text-xs text-muted">{summary.note}</div>}</Card>)}
   </article>;
 }

@@ -16,6 +16,8 @@ def check_allowed_sql(sql: str) -> str:
         raise GuardError("Only one SQL statement is allowed.")
     if not re.match(r"^(select|with|insert|update|delete|replace|create|alter|truncate|drop|rename)\b", cleaned, re.IGNORECASE):
         raise GuardError(f"Only these SQL statements are allowed: {_ALLOWED}.")
+    if re.match(r"^(create|alter|drop|rename)\s+(user|role)\b", cleaned, re.IGNORECASE):
+        raise GuardError("User and role management statements are not allowed.")
     return cleaned
 
 

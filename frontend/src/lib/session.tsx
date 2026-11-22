@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "./api";
 
 export type Session = { sessionId: string; connectionId: number; host: string; port: number; database: string; hasMetadata: boolean };
-type SessionContextValue = { session: Session | null; setSession: (session: Session) => void; clearSession: () => void; markExtracted: () => void };
+type SessionContextValue = { session: Session | null; setSession: (session: Session) => void; clearSession: () => void; markExtracted: () => void; markMetadataStale: () => void };
 const SessionContext = createContext<SessionContextValue | null>(null);
 const STORAGE_KEY = "nl2sql.session";
 
@@ -35,7 +35,15 @@ export function SessionProvider({ children }: { children: ReactNode }): JSX.Elem
       return next;
     });
   }, []);
-  const value = useMemo(() => ({ session, setSession, clearSession, markExtracted }), [session, setSession, clearSession, markExtracted]);
+  const markMetadataStale = useCallback(() => {
+    updateSession((current) => {
+      if (!current) return current;
+      const next = { ...current, hasMetadata: false };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const value = useMemo(() => ({ session, setSession, clearSession, markExtracted, markMetadataStale }), [session, setSession, clearSession, markExtracted, markMetadataStale]);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 

@@ -37,6 +37,7 @@ def run_statement(engine: Engine, sql: str) -> tuple[list[str], list[list[Any]],
                 records = records[: settings.result_row_limit]
                 return list(result.keys()), [[_json_value(value) for value in row] for row in records], truncated, len(records)
             conn.commit()
-            return [], [], False, max(result.rowcount, 0)
+            affected_rows = result.rowcount if isinstance(result.rowcount, int) else 0
+            return [], [], False, max(affected_rows, 0)
     except DBAPIError as exc:
         raise DatabaseError(str(exc.orig)) from exc

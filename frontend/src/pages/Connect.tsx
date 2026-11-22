@@ -86,7 +86,7 @@ export function Connect(): JSX.Element {
           <Input label="Database" value={form.database} onChange={(event) => update("database", event.target.value)} error={fieldErrors.database} autoComplete="off" />
           <Input ref={usernameInput} label="Username" value={form.username} onChange={(event) => update("username", event.target.value)} error={fieldErrors.username} autoComplete="off" />
           <Input label="Password" type="password" value={form.password} onChange={(event) => update("password", event.target.value)} autoComplete="off" />
-          {error && <Alert>{error}</Alert>}<p className="text-xs leading-relaxed text-muted">Use a read-only MySQL user. Credentials are held in the backend's memory for this session only and are never saved.</p><Button type="submit" loading={stage === "connecting"}>Connect</Button>
+          {error && <Alert>{error}</Alert>}<p className="text-xs leading-relaxed text-muted">Use a MySQL user with only the permissions you need. Credentials are held in the backend's memory for this session only and are never saved.</p><Button type="submit" loading={stage === "connecting"}>Connect</Button>
         </form>}
       </Card>
       <Card className={`p-5 ${!isConnected ? "opacity-50" : ""}`}><div className="mb-4"><h2 className="font-semibold tracking-tight">2 · Extract</h2><p className="mt-1 text-xs text-muted">Explore structure and a small sample of data.</p></div>
