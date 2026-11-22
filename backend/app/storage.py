@@ -102,6 +102,11 @@ def get_schema_cache(connection_id: int) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
+def clear_schema_cache(connection_id: int) -> None:
+    with _connection() as conn:
+        conn.execute("DELETE FROM schema_cache WHERE connection_id=?", (connection_id,))
+
+
 def create_chat(connection_id: int, question: str, generated_sql: str) -> int:
     with _connection() as conn:
         cursor = conn.execute(

@@ -1,0 +1,26 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --color-bg: #121212;
+  --color-surface: #171717;
+  --color-surface-2: #1f1f1f;
+  --color-border: #2e2e2e;
+  --color-border-strong: #3a3a3a;
+  --color-fg: #ededed;
+  --color-muted: #a0a0a0;
+  --color-dim: #6b6b6b;
+  --color-accent: #3ecf8e;
+  --color-accent-solid: #006239;
+  --color-accent-solid-hover: #00703f;
+  --color-danger: #e5484d;
+  --color-warning: #f5a623;
+}
+
+html { color-scheme: dark; }
+body { @apply bg-bg text-fg font-sans antialiased text-sm; }
+button, a, input, textarea { @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg; }
+textarea { resize: vertical; }

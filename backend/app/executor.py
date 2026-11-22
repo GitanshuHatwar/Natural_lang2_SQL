@@ -6,7 +6,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 
 from .config import settings
-from .sql_guard import check_select_only
+from .sql_guard import check_allowed_sql
 
 
 class DatabaseError(Exception):
@@ -25,15 +25,18 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def run_select(engine: Engine, sql: str) -> tuple[list[str], list[list[Any]], bool]:
-    cleaned = check_select_only(sql)
+def run_statement(engine: Engine, sql: str) -> tuple[list[str], list[list[Any]], bool, int]:
+    cleaned = check_allowed_sql(sql)
     try:
         with engine.connect() as conn:
             conn.exec_driver_sql(f"SET SESSION MAX_EXECUTION_TIME = {settings.query_timeout_seconds * 1000}")
             result = conn.execution_options(no_parameters=True).exec_driver_sql(cleaned)
-            records = result.fetchmany(settings.result_row_limit + 1)
-            truncated = len(records) > settings.result_row_limit
-            records = records[: settings.result_row_limit]
-            return list(result.keys()), [[_json_value(value) for value in row] for row in records], truncated
+            if result.returns_rows:
+                records = result.fetchmany(settings.result_row_limit + 1)
+                truncated = len(records) > settings.result_row_limit
+                records = records[: settings.result_row_limit]
+                return list(result.keys()), [[_json_value(value) for value in row] for row in records], truncated, len(records)
+            conn.commit()
+            return [], [], False, max(result.rowcount, 0)
     except DBAPIError as exc:
         raise DatabaseError(str(exc.orig)) from exc

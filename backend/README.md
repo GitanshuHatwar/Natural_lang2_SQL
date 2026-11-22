@@ -11,7 +11,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-The server is deliberately bound only to `127.0.0.1`; `/connect` receives MySQL credentials. Startup creates `app.db` and its four storage tables. Ollama must be running locally and the configured model must be available.
+The server is deliberately bound only to `127.0.0.1`; `/connect` receives MySQL credentials. Startup creates `app.db` and its four storage tables. Ollama must be running locally and the configured model must be available. Use a MySQL account with only the permissions needed for the operations you intend to run.
 
 ## Routes
 
@@ -19,7 +19,7 @@ The server is deliberately bound only to `127.0.0.1`; `/connect` receives MySQL 
 - `GET /connections` — list prior credential-free connection records.
 - `POST /extract` — profile the connected database and cache schema metadata.
 - `POST /generate-sql` — turn a question into SQL without executing it.
-- `POST /execute` — run user-reviewed SELECT SQL.
+- `POST /execute` — run user-reviewed permitted SQL (SELECT, row changes, and schema changes).
 - `POST /summarize` — summarize or analyze an executed query by re-running it.
 - `GET /connections/{connection_id}/chats` — read persisted chat and summary history.
 

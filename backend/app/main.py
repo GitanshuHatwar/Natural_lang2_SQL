@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from .config import settings
-from .executor import DatabaseError, run_select
+from .executor import DatabaseError, run_statement
 from .extractor import extract_metadata, render_metadata
 from .llm import clean_sql, fix_sql, generate_sql, summarize_result
 from .prompting import build_schema_context, history_block
@@ -18,9 +18,9 @@ from .schemas import (
     SummarizeRequest, SummarizeResponse,
 )
 from .sessions import Session, create_session, get_session, make_engine
-from .sql_guard import GuardError
+from .sql_guard import GuardError, is_select_statement
 from .storage import (
-    chats_with_summaries, create_chat, create_summary, executed_history, get_chat, get_connection,
+    chats_with_summaries, clear_schema_cache, create_chat, create_summary, executed_history, get_chat, get_connection,
     get_schema_cache, has_metadata, init_db, list_connections, mark_chat_error, mark_chat_executed,
     save_schema_cache, upsert_connection, utc_now,
 )
@@ -51,6 +51,10 @@ def _chat_for_session(chat_id: int, session: Session) -> dict[str, Any]:
     if chat is None or chat["connection_id"] != session.connection_id:
         raise HTTPException(404, "Chat not found.")
     return chat
+
+
+def _changes_schema(sql: str) -> bool:
+    return sql.lstrip().lower().startswith(("create", "alter", "truncate", "drop", "rename"))
 
 
 def _statistics(columns: list[str], rows: list[list[Any]]) -> tuple[str, str]:
@@ -131,7 +135,7 @@ def execute(request: ExecuteRequest) -> dict[str, Any]:
     retried = False
     sql_that_ran = request.sql
     try:
-        columns, rows, truncated = run_select(session.engine, sql_that_ran)
+        columns, rows, truncated, row_count = run_statement(session.engine, sql_that_ran)
     except GuardError as exc:
         mark_chat_error(chat["id"], str(exc))
         raise HTTPException(400, str(exc)) from exc
@@ -148,15 +152,18 @@ def execute(request: ExecuteRequest) -> dict[str, Any]:
         sql_that_ran = clean_sql(fix_sql(schema_context, chat["question"], request.sql, error))
         retried = True
         try:
-            columns, rows, truncated = run_select(session.engine, sql_that_ran)
+            columns, rows, truncated, row_count = run_statement(session.engine, sql_that_ran)
         except (GuardError, DatabaseError) as retry_exc:
             message = str(retry_exc)
             mark_chat_error(chat["id"], message)
             raise HTTPException(400, message) from retry_exc
-    mark_chat_executed(chat["id"], sql_that_ran, len(rows))
+    metadata_stale = _changes_schema(sql_that_ran)
+    if metadata_stale:
+        clear_schema_cache(session.connection_id)
+    mark_chat_executed(chat["id"], sql_that_ran, row_count)
     return {
         "chat_id": chat["id"], "sql": sql_that_ran, "retried": retried, "columns": columns,
-        "rows": rows, "row_count": len(rows), "truncated": truncated,
+        "rows": rows, "row_count": row_count, "truncated": truncated, "metadata_stale": metadata_stale,
     }
 
 
@@ -167,7 +174,12 @@ def summarize(request: SummarizeRequest) -> dict[str, Any]:
     if chat["executed_sql"] is None:
         raise HTTPException(400, "Execute the query first.")
     try:
-        columns, rows, truncated = run_select(session.engine, chat["executed_sql"])
+        if not is_select_statement(chat["executed_sql"]):
+            raise HTTPException(400, "Only SELECT query results can be summarized.")
+    except GuardError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        columns, rows, truncated, _ = run_statement(session.engine, chat["executed_sql"])
     except (GuardError, DatabaseError) as exc:
         raise HTTPException(400, str(exc)) from exc
     stats_block, sample_csv = _statistics(columns, rows)

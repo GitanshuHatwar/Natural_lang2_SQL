@@ -61,6 +61,7 @@ class ExecuteResponse(BaseModel):
     rows: list[list[object]]
     row_count: int
     truncated: bool
+    metadata_stale: bool
 
 
 class SummarizeRequest(BaseModel):

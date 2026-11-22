@@ -8,11 +8,12 @@ from langchain_ollama import ChatOllama
 
 from .config import settings
 
-_RULES = """You are an expert MySQL query writer. Convert the user's question into ONE MySQL SELECT query.
+_RULES = """You are an expert MySQL query writer. Convert the user's question into ONE permitted MySQL statement.
 Rules:
-- Output only the SQL query. No explanation and no markdown.
-- Use only the tables and columns listed in the schema below.
-- Use only SELECT (or WITH ... SELECT). Never modify data.
+- Output only the SQL statement. No explanation and no markdown.
+- Use the schema below for references to existing tables and columns.
+- Use only one of: SELECT (or WITH ... SELECT), INSERT, UPDATE, DELETE, REPLACE, CREATE, ALTER, TRUNCATE, DROP, or RENAME.
+- Never use GRANT, REVOKE, transaction-control statements, USE, SET, or multiple statements.
 - Use column values exactly as shown in the schema.
 - Use MySQL syntax.
 
@@ -21,7 +22,7 @@ DATABASE SCHEMA:
 
 _llm = ChatOllama(model=settings.ollama_model, base_url=settings.ollama_base_url, temperature=0, num_ctx=settings.ollama_num_ctx)
 _generate_chain = ChatPromptTemplate.from_messages([("system", _RULES), ("human", "{history_block}Question: {question}\nSQL:")]) | _llm | StrOutputParser()
-_fix_chain = ChatPromptTemplate.from_messages([("system", _RULES), ("human", "The question was: {question}\nThis query failed:\n{failed_sql}\nMySQL error: {error}\nReturn a corrected single SELECT query. Output only the SQL.")]) | _llm | StrOutputParser()
+_fix_chain = ChatPromptTemplate.from_messages([("system", _RULES), ("human", "The question was: {question}\nThis query failed:\n{failed_sql}\nMySQL error: {error}\nReturn a corrected single permitted SQL statement. Output only the SQL.")]) | _llm | StrOutputParser()
 _summarize_chain = ChatPromptTemplate.from_messages([
     ("system", """You explain database query results to a non-technical reader.
 Use ONLY the data provided below. Do not invent numbers, columns or facts.
