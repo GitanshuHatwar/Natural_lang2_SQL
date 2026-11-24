@@ -1,5 +1,5 @@
 # NL2SQL
-
+<img width="1301" height="820" alt="image" src="https://github.com/user-attachments/assets/684493e9-15c7-46c0-94d9-a94c644ddce0" />
 Ask your MySQL database questions in plain English. The app turns your question into SQL with a local Ollama model, lets you review and run it, shows the results, and can summarize or analyze them.
 
 - **Backend:** FastAPI, SQLAlchemy, LangChain, SQLite (app history)
